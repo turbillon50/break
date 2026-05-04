@@ -1,13 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "echo 'no build needed; functions transpiled by Vercel'",
-  "outputDirectory": ".",
+  "outputDirectory": "public",
   "functions": {
     "api/index.ts": {
       "maxDuration": 30
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+    { "source": "/api/(.*)", "destination": "/api/index" }
   ]
 }
