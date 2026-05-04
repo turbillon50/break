@@ -24,6 +24,9 @@ export function createApp(): Hono {
 
   app.onError(errorHandler);
 
+  app.route('/api/health', healthRouter);
+  // Legacy /health alias (Vercel ignores files outside /api, but local Node
+  // server still serves this).
   app.route('/health', healthRouter);
 
   app.route('/api/break/bootstrap', bootstrapRouter);
