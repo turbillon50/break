@@ -1,15 +1,11 @@
-// Vercel serverless entry on the Node.js runtime. The catch-all route name
-// `[[...slug]].ts` makes Vercel send every request that didn't match another
-// file here.
+// Vercel serverless entry on the Node.js runtime. Catch-all dynamic route.
 //
-// hono/vercel's `handle()` returns a Web-Fetch handler — that targets the
-// Edge runtime. We're on Node runtime (so we can use node:crypto, pino, etc.),
-// so we wrap the Hono app with @hono/node-server's getRequestListener, which
-// adapts a fetch handler into a Node (req, res) listener — what Vercel's
-// Node runtime actually invokes.
+// @hono/node-server/vercel exports a `handle(app)` that returns the
+// (req, res) Node-style listener Vercel's Node runtime expects. This is
+// distinct from `hono/vercel`, which targets the Edge runtime and returns
+// a Web-fetch handler that Vercel's Node runtime cannot invoke.
 
-import { getRequestListener } from '@hono/node-server';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { handle } from '@hono/node-server/vercel';
 import { createApp } from '../src/server.js';
 
 export const config = {
@@ -17,8 +13,5 @@ export const config = {
 };
 
 const app = createApp();
-const listener = getRequestListener(app.fetch.bind(app));
 
-export default function handler(req: IncomingMessage, res: ServerResponse): void {
-  void listener(req, res);
-}
+export default handle(app);
