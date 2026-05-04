@@ -3,7 +3,7 @@
   "buildCommand": "echo 'no build needed; functions transpiled by Vercel'",
   "outputDirectory": ".",
   "functions": {
-    "api/[[...slug]].ts": {
+    "api/[...slug].ts": {
       "maxDuration": 30
     }
   }
