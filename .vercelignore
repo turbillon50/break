@@ -1,0 +1,13 @@
+# Build artifacts (only present locally) — Vercel was treating dist/index.js
+# as a function entry, building it as a Lambda, and that build's default
+# export (a side-effecting serve() call) failed Vercel's invocation analysis.
+dist/
+
+# Things irrelevant to the deployed function bundle.
+src/tests/
+docs/
+scripts/
+
+# Local env, never ship.
+.env
+.env.*
