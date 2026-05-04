@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "echo 'no build needed; functions transpiled by Vercel'",
   "functions": {
     "api/[[...slug]].ts": {
       "maxDuration": 30
