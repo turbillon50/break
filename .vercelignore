@@ -3,6 +3,12 @@
 # export (a side-effecting serve() call) failed Vercel's invocation analysis.
 dist/
 
+# src/index.ts is the Railway/local long-lived process entry. Its default
+# behavior is to call serve() and listen forever — not a Vercel handler.
+# api/[[...slug]].ts only needs src/server.ts (and its transitive imports),
+# never src/index.ts, so excluding it is safe.
+src/index.ts
+
 # Things irrelevant to the deployed function bundle.
 src/tests/
 docs/
