@@ -7,6 +7,8 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+let lastSweepAt = 0;
+const SWEEP_INTERVAL_MS = 60_000;
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -21,9 +23,20 @@ function clientKey(c: Parameters<MiddlewareHandler>[0]): string {
   return 'unknown';
 }
 
+// Inline sweep instead of setInterval — setInterval can keep serverless
+// functions alive past return even with .unref(), causing timeouts.
+function sweepIfDue(now: number): void {
+  if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = now;
+  for (const [k, b] of buckets) {
+    if (b.resetAt <= now) buckets.delete(k);
+  }
+}
+
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
   return async (c, next) => {
     const now = Date.now();
+    sweepIfDue(now);
     const key = `${c.req.method}:${c.req.path}:${clientKey(c)}`;
     const bucket = buckets.get(key);
 
@@ -45,11 +58,3 @@ export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
     await next();
   };
 }
-
-const SWEEP_INTERVAL_MS = 60_000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, b] of buckets) {
-    if (b.resetAt <= now) buckets.delete(k);
-  }
-}, SWEEP_INTERVAL_MS).unref();
