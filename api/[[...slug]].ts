@@ -1,8 +1,15 @@
-// Vercel serverless entry. All HTTP requests rewrite to /api/index per
-// vercel.json, and Hono routes them. The src/index.ts entry stays untouched
-// for Railway/local, where @hono/node-server runs a long-lived process.
+// Vercel serverless entry on the Node.js runtime. The catch-all route name
+// `[[...slug]].ts` makes Vercel send every request that didn't match another
+// file here.
+//
+// hono/vercel's `handle()` returns a Web-Fetch handler — that targets the
+// Edge runtime. We're on Node runtime (so we can use node:crypto, pino, etc.),
+// so we wrap the Hono app with @hono/node-server's getRequestListener, which
+// adapts a fetch handler into a Node (req, res) listener — what Vercel's
+// Node runtime actually invokes.
 
-import { handle } from 'hono/vercel';
+import { getRequestListener } from '@hono/node-server';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createApp } from '../src/server.js';
 
 export const config = {
@@ -10,5 +17,8 @@ export const config = {
 };
 
 const app = createApp();
+const listener = getRequestListener(app.fetch.bind(app));
 
-export default handle(app);
+export default function handler(req: IncomingMessage, res: ServerResponse): void {
+  void listener(req, res);
+}
