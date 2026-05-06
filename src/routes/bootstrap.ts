@@ -5,6 +5,7 @@ import { logger } from '../lib/logger.js';
 import { fail, ok } from '../lib/responses.js';
 import type {
   DecisionRow,
+  FreeMemoryRow,
   IdentityRow,
   LessonRow,
   RelationshipRow,
@@ -39,6 +40,7 @@ interface LessonItem {
   title: string;
   context: string;
   lesson: string;
+  severity: string;
   created_at: string;
 }
 
@@ -49,6 +51,7 @@ interface DecisionItem {
   decision_text: string;
   rationale: string;
   decided_by: string;
+  status: string;
 }
 
 interface TechnicalNoteItem {
@@ -56,6 +59,7 @@ interface TechnicalNoteItem {
   category: string;
   title: string;
   content: string;
+  is_active: boolean;
   updated_at: string;
 }
 
@@ -66,6 +70,13 @@ interface SnapshotItem {
   key_events: string | null;
   pending: string | null;
   emotional_notes: string | null;
+}
+
+interface FreeMemoryItem {
+  id: number;
+  tags: string | null;
+  content: string;
+  created_at: string;
 }
 
 interface TanitBaseline {
@@ -106,6 +117,7 @@ bootstrapRouter.get('/', async (c) => {
   const startedAt = Date.now();
 
   try {
+    // Manifiesto separately so it's the only critical query.
     const manifiestoP = db`
       SELECT key, content, priority, updated_at
       FROM identity
@@ -113,10 +125,12 @@ bootstrapRouter.get('/', async (c) => {
       LIMIT 1
     ` as unknown as Promise<IdentityRow[]>;
 
+    // Everything else is "TODO" — no severity / status / is_active filters,
+    // no LIMIT clauses. Break gets the full DB on every cold start.
     const identityCoreP = db`
       SELECT key, content, priority, updated_at
       FROM identity
-      WHERE priority BETWEEN 1 AND 2
+      WHERE key <> 'manifiesto'
       ORDER BY priority ASC, key ASC
     ` as unknown as Promise<IdentityRow[]>;
 
@@ -126,42 +140,49 @@ bootstrapRouter.get('/', async (c) => {
       ORDER BY entity ASC, aspect ASC
     ` as unknown as Promise<RelationshipRow[]>;
 
-    const lessonsCriticalP = db`
-      SELECT id, title, context, lesson, created_at
+    const lessonsAllP = db`
+      SELECT id, title, context, lesson, severity, created_at
       FROM lessons
-      WHERE severity = 'critical'
-      ORDER BY created_at DESC
+      ORDER BY
+        CASE severity
+          WHEN 'critical' THEN 0
+          WHEN 'important' THEN 1
+          WHEN 'note' THEN 2
+          ELSE 3
+        END,
+        created_at DESC
     ` as unknown as Promise<LessonRow[]>;
 
-    const lessonsImportantP = db`
-      SELECT id, title, context, lesson, created_at
-      FROM lessons
-      WHERE severity = 'important'
-      ORDER BY created_at DESC
-      LIMIT 10
-    ` as unknown as Promise<LessonRow[]>;
-
-    const decisionsActiveP = db`
-      SELECT id, decision_date, title, decision_text, rationale, decided_by
+    const decisionsAllP = db`
+      SELECT id, decision_date, title, decision_text, rationale, decided_by, status
       FROM decisions
-      WHERE status = 'active'
-      ORDER BY decision_date DESC
-      LIMIT 20
+      ORDER BY
+        CASE status
+          WHEN 'active' THEN 0
+          WHEN 'superseded' THEN 1
+          WHEN 'reverted' THEN 2
+          ELSE 3
+        END,
+        decision_date DESC
     ` as unknown as Promise<DecisionRow[]>;
 
-    const techNotesP = db`
-      SELECT id, category, title, content, updated_at
+    const techNotesAllP = db`
+      SELECT id, category, title, content, is_active, updated_at
       FROM technical_notes
-      WHERE is_active = TRUE
-      ORDER BY category ASC, created_at DESC
+      ORDER BY is_active DESC, category ASC, created_at DESC
     ` as unknown as Promise<TechnicalNoteRow[]>;
 
-    const snapshotsP = db`
+    const snapshotsAllP = db`
       SELECT id, session_date, summary, key_events, pending, emotional_notes
       FROM session_snapshots
       ORDER BY session_date DESC, id DESC
-      LIMIT 3
     ` as unknown as Promise<SessionSnapshotRow[]>;
+
+    const freeMemoryAllP = db`
+      SELECT id, tags, content, created_at
+      FROM free_memory
+      ORDER BY created_at DESC
+    ` as unknown as Promise<FreeMemoryRow[]>;
 
     const statsP = db`
       SELECT
@@ -188,7 +209,6 @@ bootstrapRouter.get('/', async (c) => {
 
     const tanitBaselineP = loadTanitBaseline();
 
-    // Manifiesto query is the only one whose failure aborts bootstrap.
     let manifiestoRows: IdentityRow[];
     try {
       manifiestoRows = await manifiestoP;
@@ -199,7 +219,6 @@ bootstrapRouter.get('/', async (c) => {
       });
     }
 
-    // Other queries are tolerant: failure → empty result, log a warning.
     const settle = async <T>(p: Promise<T>, label: string, fallback: T): Promise<T> => {
       try {
         return await p;
@@ -212,21 +231,21 @@ bootstrapRouter.get('/', async (c) => {
     const [
       identityCore,
       relationships,
-      lessonsCritical,
-      lessonsImportant,
-      decisionsActive,
-      techNotes,
-      snapshots,
+      lessonsAll,
+      decisionsAll,
+      techNotesAll,
+      snapshotsAll,
+      freeMemoryAll,
       statsRows,
       tanitBaseline,
     ] = await Promise.all([
       settle(identityCoreP, 'identity_core', [] as IdentityRow[]),
       settle(relationshipsP, 'relationships', [] as RelationshipRow[]),
-      settle(lessonsCriticalP, 'lessons_critical', [] as LessonRow[]),
-      settle(lessonsImportantP, 'lessons_important', [] as LessonRow[]),
-      settle(decisionsActiveP, 'decisions_active', [] as DecisionRow[]),
-      settle(techNotesP, 'technical_notes_active', [] as TechnicalNoteRow[]),
-      settle(snapshotsP, 'last_snapshots', [] as SessionSnapshotRow[]),
+      settle(lessonsAllP, 'lessons_all', [] as LessonRow[]),
+      settle(decisionsAllP, 'decisions_all', [] as DecisionRow[]),
+      settle(techNotesAllP, 'technical_notes_all', [] as TechnicalNoteRow[]),
+      settle(snapshotsAllP, 'snapshots_all', [] as SessionSnapshotRow[]),
+      settle(freeMemoryAllP, 'free_memory_all', [] as FreeMemoryRow[]),
       settle(statsP, 'stats', [] as Awaited<typeof statsP>),
       tanitBaselineP,
     ]);
@@ -242,6 +261,46 @@ bootstrapRouter.get('/', async (c) => {
       list.push({ aspect: r.aspect, content: r.content, updated_at: r.updated_at });
     }
 
+    // Buckets kept for backwards compatibility with the existing frontend
+    // (lessons_critical / lessons_important / decisions_active / etc.) —
+    // they all source from the same all-rows queries above, no extra DB hits.
+    const lessonsByName = (sev: string): LessonItem[] =>
+      lessonsAll
+        .filter((r) => r.severity === sev)
+        .map<LessonItem>((r) => ({
+          id: r.id,
+          title: r.title,
+          context: r.context,
+          lesson: r.lesson,
+          severity: r.severity,
+          created_at: r.created_at,
+        }));
+
+    const decisionsByStatus = (st: string): DecisionItem[] =>
+      decisionsAll
+        .filter((r) => r.status === st)
+        .map<DecisionItem>((r) => ({
+          id: r.id,
+          decision_date: r.decision_date,
+          title: r.title,
+          decision_text: r.decision_text,
+          rationale: r.rationale,
+          decided_by: r.decided_by,
+          status: r.status,
+        }));
+
+    const techNotesByActive = (active: boolean): TechnicalNoteItem[] =>
+      techNotesAll
+        .filter((r) => r.is_active === active)
+        .map<TechnicalNoteItem>((r) => ({
+          id: r.id,
+          category: r.category,
+          title: r.title,
+          content: r.content,
+          is_active: r.is_active,
+          updated_at: r.updated_at,
+        }));
+
     const stats = statsRows[0] ?? {
       identity_count: 0,
       relationships_count: 0,
@@ -255,6 +314,7 @@ bootstrapRouter.get('/', async (c) => {
 
     const payload = {
       manifiesto,
+      // Identity: all rows except manifiesto (manifiesto sits at top level).
       identity_core: identityCore.map<IdentityCoreItem>((r) => ({
         key: r.key,
         content: r.content,
@@ -262,36 +322,43 @@ bootstrapRouter.get('/', async (c) => {
         updated_at: r.updated_at,
       })),
       relationships: grouped,
-      lessons_critical: lessonsCritical.map<LessonItem>((r) => ({
+      // Backwards-compat buckets — same data, sliced by category.
+      lessons_critical: lessonsByName('critical'),
+      lessons_important: lessonsByName('important'),
+      lessons_notes: lessonsByName('note'),
+      lessons_all: lessonsAll.map<LessonItem>((r) => ({
         id: r.id,
         title: r.title,
         context: r.context,
         lesson: r.lesson,
+        severity: r.severity,
         created_at: r.created_at,
       })),
-      lessons_important: lessonsImportant.map<LessonItem>((r) => ({
-        id: r.id,
-        title: r.title,
-        context: r.context,
-        lesson: r.lesson,
-        created_at: r.created_at,
-      })),
-      decisions_active: decisionsActive.map<DecisionItem>((r) => ({
+      decisions_active: decisionsByStatus('active'),
+      decisions_superseded: decisionsByStatus('superseded'),
+      decisions_reverted: decisionsByStatus('reverted'),
+      decisions_all: decisionsAll.map<DecisionItem>((r) => ({
         id: r.id,
         decision_date: r.decision_date,
         title: r.title,
         decision_text: r.decision_text,
         rationale: r.rationale,
         decided_by: r.decided_by,
+        status: r.status,
       })),
-      technical_notes_active: techNotes.map<TechnicalNoteItem>((r) => ({
+      technical_notes_active: techNotesByActive(true),
+      technical_notes_archived: techNotesByActive(false),
+      technical_notes_all: techNotesAll.map<TechnicalNoteItem>((r) => ({
         id: r.id,
         category: r.category,
         title: r.title,
         content: r.content,
+        is_active: r.is_active,
         updated_at: r.updated_at,
       })),
-      last_snapshots: snapshots.map<SnapshotItem>((r) => ({
+      // last_snapshots kept as alias of snapshots_all for old clients that
+      // expected a small array; both now contain every snapshot.
+      last_snapshots: snapshotsAll.map<SnapshotItem>((r) => ({
         id: r.id,
         session_date: r.session_date,
         summary: r.summary,
@@ -299,12 +366,37 @@ bootstrapRouter.get('/', async (c) => {
         pending: r.pending,
         emotional_notes: r.emotional_notes,
       })),
+      snapshots_all: snapshotsAll.map<SnapshotItem>((r) => ({
+        id: r.id,
+        session_date: r.session_date,
+        summary: r.summary,
+        key_events: r.key_events,
+        pending: r.pending,
+        emotional_notes: r.emotional_notes,
+      })),
+      free_memory: freeMemoryAll.map<FreeMemoryItem>((r) => ({
+        id: r.id,
+        tags: r.tags,
+        content: r.content,
+        created_at: r.created_at,
+      })),
       tanit_baseline: tanitBaseline,
       stats,
       served_at: new Date().toISOString(),
     };
 
-    logger.info({ duration_ms: Date.now() - startedAt }, 'bootstrap_served');
+    logger.info(
+      {
+        duration_ms: Date.now() - startedAt,
+        identity: identityCore.length,
+        lessons: lessonsAll.length,
+        decisions: decisionsAll.length,
+        notes: techNotesAll.length,
+        snapshots: snapshotsAll.length,
+        free_memory: freeMemoryAll.length,
+      },
+      'bootstrap_served',
+    );
     return ok(c, payload);
   } catch (err) {
     logger.error({ err: (err as Error).message }, 'bootstrap_unexpected_error');
