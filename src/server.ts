@@ -4,6 +4,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import { requestLogging } from './middleware/logging.js';
 import { rateLimit } from './middleware/rate-limit.js';
 import { bootstrapRouter } from './routes/bootstrap.js';
+import { bootstrapCoreRouter } from './routes/bootstrap-core.js';
 import { decisionsRouter } from './routes/decisions.js';
 import { freeMemoryRouter } from './routes/free-memory.js';
 import { healthRouter } from './routes/health.js';
@@ -29,6 +30,10 @@ export function createApp(): Hono {
   // server still serves this).
   app.route('/health', healthRouter);
 
+  // Bootstrap-core: compact subset that fits in a single web_fetch (Break
+  // in Claude consumer app). Must be registered BEFORE /api/break/bootstrap
+  // so the more-specific path wins.
+  app.route('/api/break/bootstrap-core', bootstrapCoreRouter);
   app.route('/api/break/bootstrap', bootstrapRouter);
   app.route('/api/break/identity', identityRouter);
   app.route('/api/break/relationships', relationshipsRouter);
